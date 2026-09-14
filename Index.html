@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulador de optimización de un método por GC</title>
+<style>
+:root{--bg:#f7f8fb;--panel:#fff;--text:#1f2937;--muted:#667085;--line:#d9dee8;--accent:#3157a4}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:1180px;margin:0 auto;padding:20px}.grid{display:grid;grid-template-columns:380px 1fr;gap:18px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}.section{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.section:first-child{border-top:0;padding-top:0;margin-top:0}.row{display:grid;grid-template-columns:1fr 120px;gap:10px;align-items:center;margin:8px 0}
+.row3{display:grid;grid-template-columns:1fr 90px 90px;gap:8px;align-items:center;margin:8px 0}
+input,select,button{font:inherit}input[type=number]{width:100%;padding:8px;border:1px solid #bcc5d3;border-radius:8px}
+.inline{display:flex;gap:14px;flex-wrap:wrap}.radio{display:flex;align-items:center;gap:6px}
+button{border:0;border-radius:9px;padding:10px 14px;background:var(--accent);color:#fff;cursor:pointer;font-weight:700}
+button.secondary{background:#eef1f6;color:#2f3b4f;border:1px solid #cdd4df}.btns{display:flex;gap:8px;flex-wrap:wrap}
+.note{background:#fff7e6;border:1px solid #efd59d;padding:10px 12px;border-radius:10px;color:#614000;margin-bottom:16px;line-height:1.4}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.metric{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px}
+.metric .v{font-size:20px;font-weight:700;margin-top:4px}.small{font-size:12px;color:var(--muted)}
+canvas{width:100%;height:auto;background:#fff;border:1px solid var(--line);border-radius:10px}
+.table-wrap{overflow:auto;margin-top:12px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
+th{background:#f3f5f9}.history{margin-top:18px}.error{display:none;background:#fff0f0;border:1px solid #e8b6b6;color:#7d1f1f;padding:8px 10px;border-radius:8px}
+.footer{margin:18px 0;color:var(--muted);font-size:12px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.metrics{grid-template-columns:1fr}.row,.row3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Simulador de optimización de un método por GC</h1>
+<div class="note"><b>Simulación educativa.</b> Los resultados son sintéticos y reproducen tendencias cromatográficas razonables. No representan un instrumento o método real específico.</div>
+
+<div class="grid">
+<div class="card">
+  <div class="section">
+    <h2>Condiciones de inyección</h2>
+    <div class="row"><label>Temperatura del inyector (°C)</label><input id="injTemp" type="number" min="180" max="320" step="5" value="250"></div>
+    <div class="inline">
+      <label class="radio"><input type="radio" name="mode" value="split" checked> Split</label>
+      <label class="radio"><input type="radio" name="mode" value="splitless"> Splitless</label>
+    </div>
+    <div id="splitBox" class="row"><label>Relación Split</label><input id="splitRatio" type="number" min="5" max="100" step="5" value="20"></div>
+    <div id="purgeBox" class="row" style="display:none"><label>Tiempo de purga (min)</label><input id="purgeTime" type="number" min="0.3" max="2.0" step="0.1" value="1.0"></div>
+  </div>
+
+  <div class="section">
+    <h2>Gas portador</h2>
+    <div class="row"><label>Flujo de columna (mL/min)</label><input id="flow" type="number" min="0.5" max="2.5" step="0.1" value="1.0"></div>
+  </div>
+
+  <div class="section">
+    <h2>Programa del horno</h2>
+    <div class="row"><label>Temperatura inicial (°C)</label><input id="t0" type="number" min="40" max="100" step="5" value="50"></div>
+    <div class="row"><label>Mantenimiento inicial (min)</label><input id="hold0" type="number" min="0" max="5" step="0.5" value="2"></div>
+
+    <h3>Segmento 1</h3>
+    <div class="row3"><label>Rampa (°C/min) → T1</label><input id="r1" type="number" min="2" max="30" step="1" value="8"><input id="T1" type="number" min="80" max="180" step="5" value="120"></div>
+
+    <h3>Segmento 2</h3>
+    <div class="row3"><label>Rampa (°C/min) → T2</label><input id="r2" type="number" min="2" max="30" step="1" value="15"><input id="T2" type="number" min="130" max="240" step="5" value="200"></div>
+
+    <h3>Segmento 3</h3>
+    <div class="row3"><label>Rampa (°C/min) → T3</label><input id="r3" type="number" min="2" max="40" step="1" value="25"><input id="T3" type="number" min="220" max="320" step="5" value="280"></div>
+    <div class="row"><label>Mantenimiento final (min)</label><input id="hold3" type="number" min="0" max="10" step="0.5" value="5"></div>
+  </div>
+
+  <div id="error" class="error"></div>
+  <div class="btns"><button id="runBtn">Ejecutar corrida</button><button id="resetBtn" class="secondary">Restablecer</button></div>
+</div>
+
+<div>
+  <div class="card">
+    <h2>Resultados de la corrida</h2>
+    <div class="metrics">
+      <div class="metric"><div class="small">Picos detectados</div><div class="v" id="mDetected">—</div></div>
+      <div class="metric"><div class="small">Resolución mínima</div><div class="v" id="mRs">—</div></div>
+      <div class="metric"><div class="small">Par crítico</div><div class="v" id="mPair">—</div></div>
+      <div class="metric"><div class="small">Tiempo total</div><div class="v" id="mTotal">—</div></div>
+    </div>
+    <canvas id="chrom" width="900" height="330"></canvas>
+    <div class="small">Eje x: tiempo (min). Los picos están numerados del 1 al 8.</div>
+    <div class="table-wrap">
+      <table id="resultTable"><thead><tr><th>Pico</th><th>tR (min)</th><th>Altura rel.</th><th>Anchura</th><th>Rs al siguiente</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card history">
+    <h2>Historial de corridas</h2>
+    <div class="small">Seleccione dos o más corridas para superponer sus cromatogramas.</div>
+    <div class="btns" style="margin-top:10px">
+      <button id="overlayBtn" class="secondary">Comparar seleccionadas</button>
+      <button id="clearSelBtn" class="secondary">Limpiar selección</button>
+      <button id="csvBtn" class="secondary">Exportar CSV</button>
+      <button id="clearHistoryBtn" class="secondary">Borrar historial</button>
+    </div>
+    <canvas id="overlay" width="900" height="260" style="margin-top:10px"></canvas>
+    <div class="table-wrap">
+      <table id="historyTable">
+        <thead><tr><th>Sel.</th><th>#</th><th>Modo</th><th>Split/Purga</th><th>T inyector</th><th>Flujo</th><th>Programa horno</th><th>Detectados</th><th>Rs mín.</th><th>Par crítico</th><th>Último pico</th><th>Tiempo total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="footer">El simulador no indica cuál es el método óptimo. El estudiante debe comparar corridas y justificar sus decisiones a partir de la evidencia cromatográfica.</div>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const state={history:[]};
+const compounds=[2.2,3.0,4.1,6.0,6.6,9.1,13.2,18.0];
+
+function n(id){return Number($(id).value)}
+function params(){
+  const mode=document.querySelector('input[name="mode"]:checked').value;
+  return {injTemp:n('injTemp'),mode,splitRatio:n('splitRatio'),purgeTime:n('purgeTime'),flow:n('flow'),
+  t0:n('t0'),hold0:n('hold0'),r1:n('r1'),T1:n('T1'),r2:n('r2'),T2:n('T2'),r3:n('r3'),T3:n('T3'),hold3:n('hold3')};
+}
+function totalTime(p){return p.hold0+(p.T1-p.t0)/p.r1+(p.T2-p.T1)/p.r2+(p.T3-p.T2)/p.r3+p.hold3}
+function validate(p){
+  const e=[];
+  if(!(p.t0<p.T1&&p.T1<p.T2&&p.T2<p.T3))e.push('Las temperaturas deben aumentar: T inicial < T1 < T2 < T3.');
+  if(p.flow<0.5||p.flow>2.5)e.push('El flujo debe estar entre 0.5 y 2.5 mL/min.');
+  if(p.injTemp<180||p.injTemp>320)e.push('La temperatura del inyector debe estar entre 180 y 320 °C.');
+  return e;
+}
+function simulate(p){
+  const total=totalTime(p), flowFactor=Math.pow(1/p.flow,.78);
+  const programStrength=(p.t0-50)/90+(p.r1-8)/55+(p.r2-15)/70+(p.r3-25)/90;
+  const peaks=compounds.map((base,i)=>{
+    const late=i/7;
+    let tr=base*flowFactor*Math.max(.42,1-.31*programStrength*(.35+.95*late));
+    tr+=p.hold0*.18*(.25+late);
+    if(i===3)tr+=(10-p.r1)*.018+(12-p.r2)*.010;
+    if(i===4)tr+=(10-p.r1)*.048+(12-p.r2)*.020;
+    if(i>=5)tr+=(10-p.r2)*.012*late;
+    tr=Math.max(.45,tr);
+
+    const flowPenalty=1+.55*Math.pow((p.flow-1.1)/1.1,2)+.14*Math.max(0,1/p.flow-1/1.1);
+    let width=(.10+.018*tr)*flowPenalty;
+    let amp=p.mode==='split'?1.35/Math.sqrt(Math.max(5,p.splitRatio)/5):1.30;
+    if(p.mode==='splitless')width*=1+Math.max(0,1-p.purgeTime)*.25;
+    const req=205+i*9;
+    if(p.injTemp<req)amp*=Math.max(.16,1-(req-p.injTemp)/90);
+    if(p.injTemp>300)width*=1+(p.injTemp-300)/220;
+    amp*=.86+.20*Math.sin((i+1)*1.35);
+    const detected=tr<total*.98&&amp>=.14;
+    return {id:i+1,tr,width,amp,detected};
+  }).sort((a,b)=>a.tr-b.tr);
+
+  const det=peaks.filter(p=>p.detected);
+  let minRs=Infinity,pair='—';
+  for(let i=0;i<det.length-1;i++){
+    const a=det[i],b=det[i+1],rs=1.18*(b.tr-a.tr)/(a.width+b.width);
+    a.rsNext=rs;
+    if(rs<minRs){minRs=rs;pair=a.id+'–'+b.id}
+  }
+  if(det.length)det[det.length-1].rsNext=null;
+  if(det.length<2)minRs=NaN;
+  return {peaks,detected:det.length,minRs,pair,total,lastPeak:det.length?Math.max(...det.map(x=>x.tr)):null};
+}
+function gauss(x,m,s,a){const z=(x-m)/s;return a*Math.exp(-.5*z*z)}
+function draw(canvas,runs,labels){
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height,m={l:50,r:18,t:18,b:38};
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  const maxT=Math.max(10,...runs.map(run=>Math.max(run.result.total,run.result.lastPeak||0)*1.03));
+  const pw=W-m.l-m.r,ph=H-m.t-m.b;
+  ctx.strokeStyle='#cbd3df';ctx.beginPath();ctx.moveTo(m.l,m.t);ctx.lineTo(m.l,H-m.b);ctx.lineTo(W-m.r,H-m.b);ctx.stroke();
+  ctx.font='12px Arial';ctx.fillStyle='#566074';
+  for(let k=0;k<=5;k++){
+    const t=maxT*k/5,x=m.l+pw*k/5;
+    ctx.strokeStyle='#edf0f5';ctx.beginPath();ctx.moveTo(x,m.t);ctx.lineTo(x,H-m.b);ctx.stroke();
+    ctx.fillStyle='#566074';ctx.fillText(t.toFixed(1),x-10,H-m.b+18);
+  }
+  ctx.fillText('Tiempo (min)',W/2-28,H-8);
+  const pal=['#3157a4','#b04a5a','#2e7d66','#8a5a00','#7a4aa8','#2b6f9e'];
+  runs.forEach((run,ri)=>{
+    const peaks=run.result.peaks.filter(p=>p.detected),maxAmp=Math.max(1,...peaks.map(p=>p.amp));
+    ctx.strokeStyle=pal[ri%pal.length];ctx.lineWidth=2;ctx.beginPath();
+    for(let s=0;s<=900;s++){
+      const t=maxT*s/900;let y=0;
+      peaks.forEach(p=>{y+=gauss(t,p.tr,Math.max(.02,p.width/2.355),p.amp)});
+      const x=m.l+pw*s/900,yy=H-m.b-(y/(maxAmp*1.15))*ph;
+      if(s===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);
+    }
+    ctx.stroke();
+    if(runs.length===1){
+      ctx.fillStyle='#111827';ctx.font='12px Arial';
+      peaks.forEach(p=>{const x=m.l+(p.tr/maxT)*pw;ctx.fillText(String(p.id),x-3,m.t+14)});
+    }
+  });
+  if(runs.length>1){
+    labels.forEach((lab,i)=>{ctx.fillStyle=pal[i%pal.length];ctx.fillRect(m.l+10,m.t+8+i*18,18,3);ctx.fillStyle='#384152';ctx.fillText(lab,m.l+35,m.t+12+i*18)});
+  }
+}
+function programText(p){return `${p.t0}°C (${p.hold0} min) → ${p.r1}°C/min a ${p.T1}°C → ${p.r2}°C/min a ${p.T2}°C → ${p.r3}°C/min a ${p.T3}°C (${p.hold3} min)`}
+function show(run){
+  const r=run.result;
+  $('mDetected').textContent=r.detected+'/8';
+  $('mRs').textContent=Number.isFinite(r.minRs)?r.minRs.toFixed(2):'—';
+  $('mPair').textContent=r.pair;
+  $('mTotal').textContent=r.total.toFixed(1)+' min';
+  const tb=$('resultTable').querySelector('tbody');tb.innerHTML='';
+  run.result.peaks.forEach(p=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${p.id}</td><td>${p.detected?p.tr.toFixed(2):'No detectado'}</td><td>${p.detected?p.amp.toFixed(2):'—'}</td><td>${p.detected?p.width.toFixed(2):'—'}</td><td>${p.detected&&p.rsNext!=null?p.rsNext.toFixed(2):'—'}</td>`;
+    tb.appendChild(tr);
+  });
+  draw($('chrom'),[run],['Corrida '+run.num]);
+}
+function history(){
+  const tb=$('historyTable').querySelector('tbody');tb.innerHTML='';
+  state.history.forEach(run=>{
+    const p=run.params,r=run.result,tr=document.createElement('tr');
+    const modeInfo=p.mode==='split'?`${p.splitRatio}:1`:`Purga ${p.purgeTime.toFixed(1)} min`;
+    tr.innerHTML=`<td><input type="checkbox" data-run="${run.num}"></td><td>${run.num}</td><td>${p.mode==='split'?'Split':'Splitless'}</td><td>${modeInfo}</td><td>${p.injTemp} °C</td><td>${p.flow.toFixed(1)}</td><td style="text-align:left;white-space:normal;min-width:280px">${programText(p)}</td><td>${r.detected}/8</td><td>${Number.isFinite(r.minRs)?r.minRs.toFixed(2):'—'}</td><td>${r.pair}</td><td>${r.lastPeak?r.lastPeak.toFixed(2)+' min':'—'}</td><td>${r.total.toFixed(1)} min</td>`;
+    tb.appendChild(tr);
+  });
+}
+function run(){
+  const p=params(),errs=validate(p);
+  if(errs.length){$('error').style.display='block';$('error').textContent=errs.join(' ');return}
+  $('error').style.display='none';
+  const rec={num:state.history.length+1,params:p,result:simulate(p)};
+  state.history.push(rec);show(rec);history();
+}
+function syncMode(){
+  const mode=document.querySelector('input[name="mode"]:checked').value;
+  $('splitBox').style.display=mode==='split'?'grid':'none';
+  $('purgeBox').style.display=mode==='splitless'?'grid':'none';
+}
+function reset(){
+  const d={injTemp:250,splitRatio:20,purgeTime:1,flow:1,t0:50,hold0:2,r1:8,T1:120,r2:15,T2:200,r3:25,T3:280,hold3:5};
+  Object.entries(d).forEach(([k,v])=>$(k).value=v);
+  document.querySelector('input[name="mode"][value="split"]').checked=true;syncMode();
+}
+function selected(){
+  return [...document.querySelectorAll('#historyTable input[type=checkbox]:checked')].map(c=>state.history.find(r=>r.num===Number(c.dataset.run))).filter(Boolean);
+}
+function exportCSV(){
+  if(!state.history.length)return;
+  const rows=[['Corrida','Modo','Split/Purga','T inyector (°C)','Flujo (mL/min)','Programa horno','Picos detectados','Rs mínima','Par crítico','Último pico (min)','Tiempo total (min)']];
+  state.history.forEach(run=>{
+    const p=run.params,r=run.result;
+    rows.push([run.num,p.mode,p.mode==='split'?p.splitRatio+':1':'Purga '+p.purgeTime,p.injTemp,p.flow,programText(p),r.detected,Number.isFinite(r.minRs)?r.minRs.toFixed(2):'',r.pair,r.lastPeak?r.lastPeak.toFixed(2):'',r.total.toFixed(1)]);
+  });
+  const csv=rows.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='historial_simulacion_GC.csv';a.click();URL.revokeObjectURL(url);
+}
+document.querySelectorAll('input[name="mode"]').forEach(x=>x.addEventListener('change',syncMode));
+$('runBtn').addEventListener('click',run);
+$('resetBtn').addEventListener('click',reset);
+$('overlayBtn').addEventListener('click',()=>{const runs=selected();if(runs.length>=2)draw($('overlay'),runs,runs.map(r=>'Corrida '+r.num))});
+$('clearSelBtn').addEventListener('click',()=>document.querySelectorAll('#historyTable input[type=checkbox]').forEach(x=>x.checked=false));
+$('clearHistoryBtn').addEventListener('click',()=>{state.history=[];history();const c=$('overlay').getContext('2d');c.clearRect(0,0,$('overlay').width,$('overlay').height)});
+$('csvBtn').addEventListener('click',exportCSV);
+syncMode();run();
+})();
+</script>
+</body>
+</html>
